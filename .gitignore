@@ -1,0 +1,6 @@
+
+/backend/target/
+/backend/data/
+/data/
+/backend/pom-folder-backup/
+/backend/*.backup

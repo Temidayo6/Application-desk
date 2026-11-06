@@ -1,123 +1,197 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 const statuses = ['Saved', 'Applied', 'Interview', 'Offer', 'Closed']
+const api = '/api/applications'
+
+async function request(url, options = {}) {
+  const response = await fetch(url, options)
+
+  if (!response.ok) {
+    throw new Error(`Request failed (${response.status}). Please try again.`)
+  }
+
+  return response.status === 204 ? null : response.json()
+}
 
 export default function App() {
-  const [applications, setApplications] = useState(() => {
-    try {
-      const saved = JSON.parse(
-        localStorage.getItem('application-desk') || '[]'
-      )
-      return Array.isArray(saved) ? saved : []
-    } catch {
-      return []
-    }
-  })
-
+  const [applications, setApplications] = useState([])
   const [company, setCompany] = useState('')
   const [role, setRole] = useState('')
   const [search, setSearch] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
-  function saveApplications(updated) {
-    setApplications(updated)
+  useEffect(() => {
+    let active = true
+
+    request(api)
+      .then(data => {
+        if (active) setApplications(data)
+      })
+      .catch(() => {
+        if (active) {
+          setError('Could not load applications. Check that the backend is running.')
+        }
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [])
+
+  async function addApplication(event) {
+    event.preventDefault()
+    if (busy) return
+
+    if (!company.trim() || !role.trim()) {
+      setError('Enter both a company and a role.')
+      return
+    }
+
+    setBusy(true)
+    setError('')
 
     try {
-      localStorage.setItem('application-desk', JSON.stringify(updated))
-      setError('')
-    } catch {
-      setError('Could not save to this browser. Keep this tab open.')
+      const saved = await request(api, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          company: company.trim(),
+          role: role.trim(),
+          status: 'Saved',
+        }),
+      })
+
+      setApplications(current => [...current, saved])
+      setCompany('')
+      setRole('')
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
     }
   }
 
-  function addApplication(event) {
-    event.preventDefault()
+  async function changeStatus(application, status) {
+    if (busy) return
+    setBusy(true)
+    setError('')
 
-    if (!company.trim() || !role.trim()) return
+    try {
+      const updated = await request(`${api}/${application.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...application, status }),
+      })
 
-    const application = {
-      id: crypto.randomUUID(),
-      company: company.trim(),
-      role: role.trim(),
-      status: 'Saved',
-    }
-
-    saveApplications([...applications, application])
-    setCompany('')
-    setRole('')
-  }
-
-  function changeStatus(id, status) {
-    saveApplications(
-      applications.map(application =>
-        application.id === id
-          ? { ...application, status }
-          : application
+      setApplications(current =>
+        current.map(item => item.id === updated.id ? updated : item)
       )
-    )
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
   }
 
-  function deleteApplication(id) {
-    if (!window.confirm('Delete this application?')) return
+  async function deleteApplication(application) {
+    if (busy) return
+    if (!window.confirm(`Delete ${application.company} — ${application.role}?`)) {
+      return
+    }
 
-    saveApplications(
-      applications.filter(application => application.id !== id)
-    )
+    setBusy(true)
+    setError('')
+
+    try {
+      await request(`${api}/${application.id}`, { method: 'DELETE' })
+      setApplications(current =>
+        current.filter(item => item.id !== application.id)
+      )
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
   }
 
-  const visibleApplications = applications.filter(application =>
-    `${application.company} ${application.role}`
-      .toLowerCase()
-      .includes(search.toLowerCase())
+  const query = search.trim().toLowerCase()
+  const visible = applications.filter(application =>
+    `${application.company} ${application.role}`.toLowerCase().includes(query)
   )
 
   return (
     <main>
       <style>{`
-        :root {
+        * { box-sizing: border-box; }
+        body {
+          margin: 0;
           font-family: Arial, sans-serif;
           color: #20382c;
           background: #f4f7f4;
-          color-scheme: light;
         }
-        * { box-sizing: border-box; }
-        body { margin: 0; display: block; min-width: 320px; }
-        #root { width: 100%; }
-        main { max-width: 850px; margin: auto; padding: 32px 20px; }
+        main {
+          max-width: 850px;
+          margin: 0 auto;
+          padding: 32px 20px;
+        }
         h1 { font-size: 36px; margin-bottom: 8px; }
         h2 { font-size: 22px; }
         form, article {
           background: white;
           padding: 20px;
-          border: 1px solid #dce5dd;
+          border: 1px solid #d5dfd7;
           border-radius: 12px;
-          margin-bottom: 16px;
+          margin-bottom: 20px;
         }
-        label { display: block; margin: 12px 0; }
-        input, select, button {
-          font: inherit;
+        label { display: block; margin-bottom: 16px; }
+        input, select, button { font: inherit; }
+        input {
+          display: block;
+          width: 100%;
           padding: 12px;
-          border: 1px solid #bdccbf;
+          margin-top: 8px;
+          border: 1px solid #aab9ae;
           border-radius: 8px;
+          color: #20382c;
+          background: white;
         }
-        input { display: block; width: 100%; margin-top: 6px; }
+        button, select {
+          padding: 12px;
+          border-radius: 8px;
+          border: 1px solid #aab9ae;
+        }
         button {
-          background: #285b40;
+          background: #24613a;
           color: white;
           cursor: pointer;
         }
-        select { background: white; color: #20382c; }
+        button:disabled, select:disabled {
+          opacity: 0.6;
+          cursor: wait;
+        }
         .actions { display: flex; gap: 12px; flex-wrap: wrap; }
-        .delete { background: white; color: #a02c2c; }
-        .search { margin: 20px 0; }
-        .error { color: #a02c2c; }
+        .delete { background: white; color: #a12626; }
+        .error { color: #a12626; }
+        header { margin-bottom: 24px; }
       `}</style>
 
       <header>
         <h1>Application Desk</h1>
         <p>Your next opportunity starts with a plan.</p>
-        <p>{applications.length} opportunities tracked</p>
+        {!loading && (
+          <p>
+            {applications.length}{' '}
+            {applications.length === 1 ? 'opportunity' : 'opportunities'} tracked
+          </p>
+        )}
       </header>
+
+      {error && <p className="error" role="alert">{error}</p>}
 
       <form onSubmit={addApplication}>
         <h2>Add an opportunity</h2>
@@ -128,6 +202,8 @@ export default function App() {
             value={company}
             onChange={event => setCompany(event.target.value)}
             placeholder="e.g. Tesla"
+            maxLength={200}
+            disabled={busy || loading}
             required
           />
         </label>
@@ -138,16 +214,18 @@ export default function App() {
             value={role}
             onChange={event => setRole(event.target.value)}
             placeholder="e.g. Software Engineering Intern"
+            maxLength={200}
+            disabled={busy || loading}
             required
           />
         </label>
 
-        <button type="submit">Save opportunity</button>
+        <button disabled={busy || loading} type="submit">
+          {busy ? 'Saving…' : 'Save opportunity'}
+        </button>
       </form>
 
-      {error && <p className="error" role="alert">{error}</p>}
-
-      <label className="search">
+      <label>
         Search opportunities
         <input
           value={search}
@@ -156,37 +234,46 @@ export default function App() {
         />
       </label>
 
-      {visibleApplications.length === 0 && (
-        <p>No opportunities found. Add one above.</p>
+      {loading ? (
+        <p role="status">Loading applications…</p>
+      ) : (
+        <>
+          {!error && visible.length === 0 && (
+            <p>{query ? 'No matching opportunities.' : 'No opportunities yet.'}</p>
+          )}
+
+          {visible.map(application => (
+            <article key={application.id}>
+              <h2>{application.company}</h2>
+              <p>{application.role}</p>
+
+              <div className="actions">
+                <select
+                  aria-label={`Status for ${application.company} ${application.role}`}
+                  value={application.status}
+                  onChange={event =>
+                    changeStatus(application, event.target.value)
+                  }
+                  disabled={busy}
+                >
+                  {statuses.map(status => (
+                    <option key={status} value={status}>{status}</option>
+                  ))}
+                </select>
+
+                <button
+                  className="delete"
+                  onClick={() => deleteApplication(application)}
+                  disabled={busy}
+                  type="button"
+                >
+                  Delete
+                </button>
+              </div>
+            </article>
+          ))}
+        </>
       )}
-
-      {visibleApplications.map(application => (
-        <article key={application.id}>
-          <h2>{application.company}</h2>
-          <p>{application.role}</p>
-
-          <div className="actions">
-            <select
-              aria-label={`Status for ${application.company}`}
-              value={application.status}
-              onChange={event =>
-                changeStatus(application.id, event.target.value)
-              }
-            >
-              {statuses.map(status => (
-                <option key={status} value={status}>{status}</option>
-              ))}
-            </select>
-
-            <button
-              className="delete"
-              onClick={() => deleteApplication(application.id)}
-            >
-              Delete
-            </button>
-          </div>
-        </article>
-      ))}
     </main>
   )
 }
